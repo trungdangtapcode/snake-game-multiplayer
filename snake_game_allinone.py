@@ -9,9 +9,9 @@ import socket
 import _thread
 import threading
 import uuid
-YOUR_IP = "10.0.177.200"
-YOUR_NAME = "ngo dinh diem"
-JOIN_IP = "10.0.118.217"
+YOUR_IP = "172.172.4.250"
+YOUR_NAME = "sus"
+JOIN_IP = "172.172.4.250"
 
 #PATTERNS
 config = {
@@ -22,7 +22,7 @@ config = {
     "FPS": 60,
     "tile_size": 40,
     "default_tile_size": 40,
-    "client_time_refresh": 0.2 #doi khi la ca server =))
+    "client_time_refresh": 1 #doi khi la ca server =))
 }
 delta_time = 10**-6
 FPS = config["FPS"]
@@ -91,7 +91,8 @@ class Level:
         self.max_food = 2
         self.snake_pos = []
         path = 'level_data.csv'
-        layout = filekit.import_csv_layout(path)
+        layout = np.array(filekit.import_csv_layout(path))
+        layout = layout.T
         for row_index, row in enumerate(layout):
             for col_index, col in enumerate(row):
                 x = int(col)
@@ -114,6 +115,7 @@ class Level:
         self.update_keyboard()
         # print('1',pygame.time.get_ticks()-x) #
         # x = pygame.time.get_ticks()
+        #THIS SO FUCKING LAGGGGGGG
         for snake in self.snakes:
             snake.update(display)
         if (display): self.draw()
@@ -140,6 +142,7 @@ class Level:
         pass
 
     def update_multiplayer_client(self):
+        "send data, receive and update"
         self.update_multiplayer_client_current_time += delta_time
         if (self.update_multiplayer_client_current_time < config["client_time_refresh"]): return
         def __new_thread():
@@ -160,6 +163,7 @@ class Level:
             self.obstacle_tiles.extend(snake.core.body_pos)
 
     def update_foods(self):
+        #generate new food
         while (len(self.foods)<self.max_food):
             pos = np.random.randint(self.level_max_height), np.random.randint(self.level_max_width)
             pos = pygame.math.Vector2(pos)
@@ -168,6 +172,7 @@ class Level:
 
     def update_keyboard(self):
         keys = pygame.key.get_pressed()
+        #zoom in/zoom out
         if (keys[pygame.K_MINUS] and config["tile_size"] > 16):
             config["tile_size"] -= 1
         if (keys[pygame.K_EQUALS] and config["tile_size"] < 100):
@@ -178,6 +183,7 @@ class Level:
         self.snakes[id] = Snake(self.obstacle_tiles, self.foods, self.snake_pos[id], id==self.playable_id)
 
     def draw_deadscreen(self):
+        #tranfer blur screen
         snake = self.snakes[self.playable_id]
         if (not snake.core.is_dead): return
         ratio = snake.graphic.current_time_deadscreen/snake.graphic.time_deadscreen
@@ -185,6 +191,7 @@ class Level:
         radius = 1 + ratio*(max_blur-1)
         gamekit.gaussian_blur(self.screen,radius)
 
+        #then print lose text
         if (ratio>=0.8):
             TEXT = Text("Loser :D", 35, "White", center = (config["screen_width"]/2,150))
             self.draw_sprite_absolute(TEXT)
@@ -202,7 +209,7 @@ class Level:
             else: self.network.kill()
         game.menu()
 
-    def get_name_list(self):
+    def get_name_list(self): #multithread
         self.get_name_list_current_time += delta_time
         if (self.get_name_list_current_time>config["client_time_refresh"]):
             def __new_thread():
@@ -225,6 +232,7 @@ class Level:
             pos = food*config["tile_size"]
             self.draw_sprite(Food_graphic(pos))
 
+        #draw name
         if (self.isMulplayer):
             name_list = self.get_name_list()
             for idx, (snake, name) in enumerate(zip(self.snakes, name_list)):
@@ -248,9 +256,15 @@ class Level:
             self.draw_sprite(sprite)
 
     def draw_ui(self):
+        #score
         max_length = 4
         if (self.isMulplayer):
-            pass
+            name_list = self.get_name_list()
+            assert name_list != None, "Name list dang la NONE!"
+            for idx in range(self.max_snakes):
+                s = str(self.snakes[idx].core.score)
+                SCORE_TEXT = Text(text = name_list[idx] + ': '+'0'*(max_length-len(s)) + s, size = 15, color = "White", topleft = (10,10+idx*20))
+                self.draw_sprite_absolute(SCORE_TEXT)
         else:
             s = str(self.snakes[self.playable_id].core.score)
             SCORE_TEXT = Text(text = 'SCORE: '+'0'*(max_length-len(s)) + s, size = 15, color = "White", topleft = (10,10))
@@ -379,6 +393,7 @@ class Snake_core:
             self.tile_direction = new_direct
     
     def update_input_keyboard(self):
+        "playable only"
         keys = pygame.key.get_pressed()
         self.hit_right = (keys[pygame.K_d] or keys[pygame.K_RIGHT])
         self.hit_left = (keys[pygame.K_a] or keys[pygame.K_LEFT])
@@ -387,6 +402,7 @@ class Snake_core:
         self.hit_sprint = keys[pygame.K_LSHIFT]
 
     def update_input_controll(self):
+        "for AI controll (etc. reinformcent)"
         pass
 
     def update_position(self):
@@ -749,12 +765,14 @@ class Server:
             conn.close()
 
     def update(self):
+        "call in private (self.open_request)"
         conn, addr = self.s.accept() 
         print("connected to: ", addr)
         if (len(self.available_slot)==0): return
         _thread.start_new_thread(self.threaded_client, (conn, addr,self.available_slot.pop(0)))
     
     def threaded_client(self, conn, addr, thread_player):
+        "conn: obj, addr: tupple, thread_player = player_id"
         self.addr_list.append(addr) #client_socket.getpeername()
         self.conn_list.append(conn)
         self.name_list.append("")
@@ -772,10 +790,10 @@ class Server:
                     reply = self.name_list
                 if data == 'game start yet':
                     reply = self.is_game_started
-                if isinstance(data,tuple) and data[0]=='set name':
+                if isinstance(data,tuple) and data[0]=='set name': #when client init connect (for the first time)
                     self.name_list[thread_player] = data[1]
                     reply = 'name seted'
-                if isinstance(data, dict):
+                if isinstance(data, dict): #snake data
                     game.level.snakes[thread_player].core.set_zip(data)
                     reply = {}
                     reply['foods'] = game.level.foods
@@ -804,13 +822,15 @@ class Network:
         print('Connected, your id is ', self.id)
 
     def connect(self):
+        "connect init"
         try:
             self.client.connect(self.addr)
             return pickle.loads(self.client.recv(4096))
         except socket.error as e:
-            print(e)
+            print('cant connect to server',e)
     
     def send(self, data):
+        "send in multithread then make the that thread wait until kernel_id reply"
         try:
             kernel_id = uuid.uuid4()
             self.client.send(pickle.dumps((kernel_id,data)))
